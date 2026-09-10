@@ -231,3 +231,23 @@ def test_long_envelope_cannot_promote_nested_error():
     assert classify_output(text) is None
     assert classify_output("progress\n" + text) is None
     assert classify_output(text + "\n" + nested) == "quota"
+
+
+def test_scan_window_cannot_create_provider_sentence_inside_json():
+    phrase = "You've hit your usage limit. This is fixture prose "
+    # Align the phrase with the old suffix window boundary, not a real line.
+    suffix = phrase + "x" * (8192 - len(phrase) - 2) + '"}'
+    text = '{"type":"result","text":"' + "x" * 20000 + suffix
+    assert json.loads(text)["type"] == "result"
+    assert classify_output(text) is None
+    assert classify_output(text + " ") is None
+    assert (
+        classify_output(
+            json.dumps(
+                {"type": "result", "text": "before\u2028" + phrase + "\u2028after"},
+                ensure_ascii=False,
+            )
+        )
+        is None
+    )
+    assert classify_output(text + "\n" + phrase) == "quota"

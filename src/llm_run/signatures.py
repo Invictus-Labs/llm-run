@@ -41,13 +41,15 @@ def _window(output: str) -> str:
     )
 
 
-def _objects(output: str):
+def _records(output: str):
     # Decode complete records before scanning onward. Truncating a JSON envelope
     # or reparsing its nested lines could turn task content into a retry signal.
     decoder = json.JSONDecoder()
     start = re.compile(r"^[ \t]*(?:ERROR: )?([\[{])", re.M)
     cursor = 0
     while match := start.search(output, cursor):
+        if match.start() > cursor:
+            yield output[cursor : match.start()]
         try:
             obj, end = decoder.raw_decode(output, match.start(1))
         except (ValueError, RecursionError):
@@ -57,11 +59,26 @@ def _objects(output: str):
         if isinstance(obj, dict):
             yield obj
         cursor = end
+    if cursor < len(output):
+        yield output[cursor:]
+
+
+def _objects(output: str):
+    for record in _records(output):
+        if isinstance(record, dict):
+            yield record
 
 
 def classify_output(output: str, model: str | None = None) -> str | None:
     """Call only for nonzero child exits, never for timeout or interrupt."""
-    for obj in _objects(output):
+    for obj in _records(output):
+        if isinstance(obj, str):
+            for line in obj.split("\n"):
+                if _LIMIT.fullmatch(line.strip()):
+                    return "quota"
+                if _AUTH.fullmatch(line.strip()):
+                    return "auth"
+            continue
         if obj.get("type") == "llm_run_error":
             kind = obj.get("kind")
             if kind in ("quota", "auth", "rejected_model"):
@@ -92,11 +109,6 @@ def classify_output(output: str, model: str | None = None) -> str | None:
         if error.get("type") in ("invalid_request_error", "not_found_error"):
             if any(pattern.search(message) for pattern in _REJECTED):
                 return "rejected_model"
-    for line in _window(output).splitlines():
-        if _LIMIT.fullmatch(line.strip()):
-            return "quota"
-        if _AUTH.fullmatch(line.strip()):
-            return "auth"
     return None
 
 
