@@ -1,0 +1,17 @@
+# Uses each CLI's configured default model and login.
+# Edit the chain to choose which providers may receive your task.
+[lanes.default]
+chain = ["codex", "claude"]
+
+[engines.codex]
+adapter = "codex"
+binary = "codex"
+timeout = 1800
+
+[engines.claude]
+adapter = "claude"
+binary = "claude"
+timeout = 1800
+
+[routing]
+default_cooldown_s = 7200
