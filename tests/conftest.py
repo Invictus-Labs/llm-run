@@ -7,7 +7,7 @@ import sys
 import pytest
 
 
-FAKE = """import argparse, json, os, signal, sys, time
+FAKE = """import argparse, json, os, signal, subprocess, sys, time
 from pathlib import Path
 p = argparse.ArgumentParser(add_help=False)
 p.add_argument('--behavior', default=os.environ.get('TEST_BEHAVIOR', 'success'))
@@ -55,6 +55,10 @@ if behavior == 'stderr-quota':
 if behavior == 'usage-overflow':
     print('{"type":"result","usage":{"input_tokens":1e999,"output_tokens":2}}')
     sys.exit(0)
+if behavior == 'grandchild-ignore-term':
+    code = "import os, signal, time; from pathlib import Path; signal.signal(signal.SIGTERM, signal.SIG_IGN); p=Path(os.environ['TEST_CAPTURE']+'.worker'); p.write_text(str(os.getpid())); time.sleep(30)"
+    subprocess.Popen([sys.executable, '-c', code], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(30)
 if behavior in ['timeout', 'timeout-quota']:
     time.sleep(30)
 if behavior == 'ignore-term':

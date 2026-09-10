@@ -42,31 +42,21 @@ def _window(output: str) -> str:
 
 
 def _objects(output: str):
-    # Whole JSON and JSONL both occur in CLI output. Only top-level errors count;
-    # errors quoted inside a successful result or tool message are ignored.
-    text = _window(output)
-    try:
-        obj = json.loads(text.strip().removeprefix("ERROR: "))
-    except (ValueError, RecursionError):
-        pass
-    else:
-        if isinstance(obj, dict):
-            yield obj
-        # A complete envelope is atomic. Do not promote nested objects into
-        # top-level errors by reparsing its individual lines.
-        return
-    if text.lstrip().startswith("{\n"):
-        return  # An incomplete/truncated pretty envelope is ambiguous.
-    for value in text.splitlines():
-        if not value.startswith(("{", "ERROR: {")):
-            continue
-        value = value.removeprefix("ERROR: ")
+    # Decode complete records before scanning onward. Truncating a JSON envelope
+    # or reparsing its nested lines could turn task content into a retry signal.
+    decoder = json.JSONDecoder()
+    start = re.compile(r"^[ \t]*(?:ERROR: )?([\[{])", re.M)
+    cursor = 0
+    while match := start.search(output, cursor):
         try:
-            obj = json.loads(value)
+            obj, end = decoder.raw_decode(output, match.start(1))
         except (ValueError, RecursionError):
-            continue
+            # An incomplete/malformed record may contain nested error examples.
+            # Its boundaries are unknown: fail closed instead of replaying work.
+            return
         if isinstance(obj, dict):
             yield obj
+        cursor = end
 
 
 def classify_output(output: str, model: str | None = None) -> str | None:

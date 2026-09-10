@@ -35,7 +35,10 @@ def _signal(proc: subprocess.Popen, sig: int) -> None:
 def _stop(proc: subprocess.Popen) -> tuple[bytes, bytes]:
     _signal(proc, signal.SIGTERM)
     try:
-        return proc.communicate(timeout=2)
+        output = proc.communicate(timeout=2)
+        # Children may remain in the group after the leader closes its pipes.
+        _signal(proc, signal.SIGKILL)
+        return output
     except subprocess.TimeoutExpired:
         _signal(proc, signal.SIGKILL)
         try:

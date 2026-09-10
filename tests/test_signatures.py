@@ -202,3 +202,32 @@ def test_huge_reset_and_deep_json_do_not_raise():
     text = "[" * 2000 + "0" + "]" * 2000
     assert parse_tokens(text)[0] is None
     assert classify_output(text) is None
+
+
+@pytest.mark.parametrize("prefix", ["", "task progress\n"])
+@pytest.mark.parametrize("opening", ["{\n", "{\r\n", "{ \n"])
+@pytest.mark.parametrize("complete", [True, False])
+def test_pretty_envelope_boundaries_survive_logs_whitespace_and_truncation(
+    prefix, opening, complete
+):
+    text = (
+        opening
+        + '"type":"result", "content":[\n{"type":"llm_run_error","kind":"quota"}\n'
+    )
+    if complete:
+        text += "]}"
+    assert classify_output(prefix + text) is None
+
+
+def test_long_envelope_cannot_promote_nested_error():
+    nested = '{"type":"llm_run_error","kind":"quota"}'
+    text = (
+        '{"type":"result","padding":'
+        + json.dumps("x" * 20000)
+        + ',"content":[\n'
+        + nested
+        + "\n]}"
+    )
+    assert classify_output(text) is None
+    assert classify_output("progress\n" + text) is None
+    assert classify_output(text + "\n" + nested) == "quota"

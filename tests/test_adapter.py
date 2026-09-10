@@ -52,4 +52,4 @@ def test_restricted_group_signalling_stops_direct_child(monkeypatch):
     proc = Mock()
     proc.communicate.return_value = (b"", b"")
     assert adapter._stop(proc) == (b"", b"")
-    proc.send_signal.assert_called_once()
+    assert proc.send_signal.call_count == 2

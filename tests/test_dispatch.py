@@ -298,3 +298,26 @@ def test_dispatch_success_does_not_erase_concurrent_quota(setup_policy, monkeypa
     monkeypatch.setattr(dispatch, "run_adapter", run)
     assert main(["--prompt", "test"]) == 0
     assert Cooldowns().active("first")
+
+
+def test_timeout_kills_same_group_descendant_with_closed_pipes(setup_policy):
+    _, capture = setup_policy("grandchild-ignore-term")
+    pid = None
+    try:
+        assert main(["--prompt", "timeout", "--timeout", "1"]) == 124
+        pid = int(Path(str(capture) + ".worker").read_text())
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.02)
+        else:
+            pytest.fail("same-group descendant survived timeout")
+    finally:
+        if pid is not None:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
