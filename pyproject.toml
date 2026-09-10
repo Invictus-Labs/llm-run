@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "invictus-llm-run"
+version = "0.1.0"
+description = "A small, configurable runner for coding-agent CLIs with fallback and local execution records"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [{name = "Jeremy Knox"}]
+dependencies = []
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Operating System :: POSIX",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development",
+]
+
+[project.urls]
+Repository = "https://github.com/Invictus-Labs/llm-run"
+Issues = "https://github.com/Invictus-Labs/llm-run/issues"
+
+[project.scripts]
+llm-run = "llm_run.cli:main"
+
+[project.optional-dependencies]
+test = ["pytest>=8,<9", "pytest-cov>=5,<7"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+llm_run = ["default.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "--cov=llm_run --cov-report=term-missing --cov-fail-under=90"
+
