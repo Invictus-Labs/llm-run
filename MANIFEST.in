@@ -1,0 +1,7 @@
+include LICENSE README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md AGENTS.md
+recursive-include src/llm_run *.py *.toml
+recursive-include tests *.py
+recursive-include examples *.py
+recursive-include docs *.md
+include scripts/verify-quality.sh
+global-exclude __pycache__ *.py[cod] .DS_Store
