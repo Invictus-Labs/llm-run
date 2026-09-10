@@ -53,12 +53,12 @@ def parser() -> argparse.ArgumentParser:
     status = subs.add_parser(
         "status", help="show binaries and observed cooldowns; no authentication probe"
     )
-    status.add_argument("--json", action="store_true")
-    status.add_argument("--lane", default="default")
+    status.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    status.add_argument("--lane", default=argparse.SUPPRESS)
     report = subs.add_parser(
         "report", help="summarize local attempts without calling an engine"
     )
-    report.add_argument("--json", action="store_true")
+    report.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     report.add_argument("--since", default="24h")
     report.add_argument("--ledger", type=Path, action="append")
     return p

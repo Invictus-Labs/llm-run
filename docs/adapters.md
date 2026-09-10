@@ -58,10 +58,14 @@ The recognized kinds are `quota`, `auth`, and `rejected_model`.
 the configured default cooldown applies. Auth and model rejection do not set a
 cooldown. Use this protocol only when retrying the same task is appropriate.
 
-A nonzero exit without a recognized failure record stops the run with exit `1`.
+Child exits `124` and `130` are reserved for timeout and interruption. Signal
+termination is also terminal. Other nonzero exits without a recognized failure
+record stop the run with exit `1`.
 A timed-out or interrupted adapter never causes fallback, regardless of its
 output. The runner first sends SIGTERM to its process group, then SIGKILL if
-needed. It is not a sandbox for programs that detach themselves from that group.
+needed, with a direct-child fallback if group signalling is denied. Detached
+descendants may outlive cleanup; retained pipes are closed after bounded waits.
+The runner is not a sandbox for programs that detach themselves from that group.
 
 See [the demo adapter](../examples/adapter.py) for a complete implementation.
 
@@ -81,3 +85,7 @@ from the child environment. Claude's adapter also removes `CLAUDECODE` so it
 can run as a child process. These defaults favor existing CLI logins; they
 cannot guarantee a particular billing mode. Custom adapters inherit the
 environment unchanged except for `LLM_RUN_ENGINE`.
+
+Selected structured provider errors are recognized conservatively. Codex JSONL
+`error` and `turn.failed` messages use the [upstream event shapes](https://github.com/openai/codex/blob/main/codex-rs/exec/src/exec_events.rs).
+Errors nested inside a complete result envelope are not fallback signals.

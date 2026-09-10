@@ -14,6 +14,20 @@ def _invalid_number(_value):
     raise ValueError("non-finite cache number")
 
 
+def _finite_float(value):
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("non-finite cache number")
+    return number
+
+
+def _bounded_int(value):
+    number = int(value)
+    if abs(number) > 2**63 - 1:
+        raise ValueError("cache number out of range")
+    return number
+
+
 class Cooldowns:
     def __init__(self, path: Path | None = None):
         self.path = path or quota_path()
@@ -22,12 +36,19 @@ class Cooldowns:
     def _decode(self, text: str) -> dict:
         try:
             data = (
-                json.loads(text, parse_constant=_invalid_number) if text.strip() else {}
+                json.loads(
+                    text,
+                    parse_constant=_invalid_number,
+                    parse_float=_finite_float,
+                    parse_int=_bounded_int,
+                )
+                if text.strip()
+                else {}
             )
             if not isinstance(data, dict):
                 raise ValueError
             return data
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, RecursionError):
             self.warning = "cooldown cache is invalid; unknown cooldowns are ignored"
             return {}
 
@@ -55,12 +76,27 @@ class Cooldowns:
             and until > time.time()
         )
 
-    def record(self, engine: str, until: int | None, reason: str) -> None:
+    def record(
+        self,
+        engine: str,
+        until: int | None,
+        reason: str,
+        *,
+        unless_newer_than: float | None = None,
+    ) -> None:
         if reason not in {"quota", "ok", "auth", "rejected_model"}:
             raise ValueError("invalid cooldown reason")
         with self._open() as fh:
             fcntl.flock(fh, fcntl.LOCK_EX)
             data = self._decode(fh.read())
+            previous = data.get(engine)
+            checked = previous.get("checked_at") if isinstance(previous, dict) else None
+            if (
+                unless_newer_than is not None
+                and isinstance(checked, (int, float))
+                and checked > unless_newer_than
+            ):
+                return
             data[engine] = {"until": until, "reason": reason, "checked_at": time.time()}
             encoded = json.dumps(data, allow_nan=False)
             fh.seek(0)

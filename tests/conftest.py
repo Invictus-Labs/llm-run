@@ -16,6 +16,9 @@ p.add_argument('--model')
 p.add_argument('--cwd')
 args, rest = p.parse_known_args()
 prompt = Path(args.prompt_file).read_text() if args.prompt_file else sys.stdin.read()
+behavior = args.behavior
+if behavior == 'timeout-quota':
+    print(json.dumps({'type':'llm_run_error','kind':'quota'}), flush=True)
 capture = os.environ.get('TEST_CAPTURE')
 if capture:
     with open(capture, 'a') as fh:
@@ -37,7 +40,22 @@ if behavior == 'error':
 if behavior == 'rejection-success':
     print(json.dumps({'type':'error','error':{'type':'rate_limit_error','message':'fixture'}}))
     sys.exit(0)
-if behavior == 'timeout':
+if behavior in ['exit-124', 'exit-130', 'signal-term']:
+    print(json.dumps({'type':'llm_run_error','kind':'quota'}), flush=True)
+    if behavior == 'signal-term':
+        os.kill(os.getpid(), signal.SIGTERM)
+    sys.exit(int(behavior.split('-')[1]))
+if behavior == 'nested-error':
+    print('{'+chr(10)+'"type":"result", "content":['+chr(10)+'{"type":"llm_run_error","kind":"quota"}'+chr(10)+']}')
+    sys.exit(17)
+if behavior == 'stderr-quota':
+    sys.stdout.write('task progress')
+    sys.stderr.write(json.dumps({'type':'llm_run_error','kind':'quota'}))
+    sys.exit(1)
+if behavior == 'usage-overflow':
+    print('{"type":"result","usage":{"input_tokens":1e999,"output_tokens":2}}')
+    sys.exit(0)
+if behavior in ['timeout', 'timeout-quota']:
     time.sleep(30)
 if behavior == 'ignore-term':
     signal.signal(signal.SIGTERM, signal.SIG_IGN)

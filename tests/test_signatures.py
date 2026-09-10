@@ -148,3 +148,57 @@ def test_scrub_synthetic_token_shapes():
         scrub("CLAUDE_CODE_OAUTH_TOKEN=example-marker")
         == "CLAUDE_CODE_OAUTH_TOKEN=<redacted>"
     )
+
+
+@pytest.mark.parametrize("indent", [None, 0, 2])
+@pytest.mark.parametrize("outer", ["result", "assistant"])
+def test_complete_envelope_does_not_promote_nested_error(indent, outer):
+    obj = {"type": outer, "content": [{"type": "llm_run_error", "kind": "quota"}]}
+    assert classify_output(json.dumps(obj, indent=indent)) is None
+    assert classify_output(json.dumps([obj], indent=indent)) is None
+
+
+def test_truncated_pretty_envelope_is_not_jsonl_error():
+    assert (
+        classify_output(
+            '{\n"type":"result", "content":[\n{"type":"llm_run_error","kind":"quota"}\n'
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        {"type": "error", "message": "You've hit your usage limit. Try again later."},
+        {
+            "type": "turn.failed",
+            "error": {"message": "You've hit your usage limit. Try again later."},
+        },
+    ],
+)
+def test_codex_top_level_error_messages(record):
+    assert (
+        classify_output(
+            json.dumps({"type": "thread.started"}) + "\n" + json.dumps(record)
+        )
+        == "quota"
+    )
+
+
+@pytest.mark.parametrize(
+    "value", ["1e999", str(2**63), "9" * 5000, "true", "-1", "1.5", '"1e999"']
+)
+def test_untrusted_token_counters_never_raise(value):
+    text = '{"usage":{"input_tokens":' + value + "}}"
+    assert parse_tokens(text)[0] is None
+
+
+def test_huge_reset_and_deep_json_do_not_raise():
+    text = json.dumps(
+        {"type": "llm_run_error", "kind": "quota", "retry_after_seconds": 10**400}
+    )
+    assert parse_reset_epoch(text, 100, now=1000) == 1100
+    text = "[" * 2000 + "0" + "]" * 2000
+    assert parse_tokens(text)[0] is None
+    assert classify_output(text) is None

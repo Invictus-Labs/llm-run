@@ -72,6 +72,7 @@ def dispatch(
         if cooldowns.active(hop.engine):
             ledger.record(**row, status="skipped", duration_s=0, quota_event="cooldown")
             continue
+        attempt_started_at = time.time()
         result = run_adapter(
             hop, cfg, prompt=prompt, cwd=cwd, timeout=timeout or cfg.timeout
         )
@@ -105,7 +106,9 @@ def dispatch(
             )
             continue
         if result.exit_code == 0:
-            cooldowns.record(hop.engine, None, "ok")
+            cooldowns.record(
+                hop.engine, None, "ok", unless_newer_than=attempt_started_at
+            )
         code = result.exit_code if result.exit_code in (0, 124, 130) else 1
         status = {0: "ok", 124: "timeout", 130: "interrupted"}.get(code, "error")
         ledger.record(

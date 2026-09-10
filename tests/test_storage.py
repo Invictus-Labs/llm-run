@@ -81,3 +81,33 @@ def test_corrupt_cache_warning_is_visible_on_run(setup_policy, tmp_path, capsys)
     cache.path.write_text("{broken")
     assert main(["--prompt", "test"]) == 0
     assert "cooldown cache is invalid" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        '{"a":{"until":1e309}}',
+        '{"a":{"until":' + "9" * 500 + "}}",
+        "[" * 2000 + "0" + "]" * 2000,
+    ],
+)
+def test_cache_extreme_numbers_and_depth_recover(tmp_path, content):
+    cache = tmp_path / "cache.json"
+    cache.write_text(content)
+    cooldowns = Cooldowns(cache)
+    assert not cooldowns.active("a")
+    cooldowns.record("b", 9999999999, "quota")
+    assert cooldowns.active("b")
+    assert cooldowns.warning
+
+
+def test_cache_older_success_preserves_new_quota(tmp_path, monkeypatch):
+    from llm_run import cooldown
+
+    cache = Cooldowns(tmp_path / "quota.json")
+    monkeypatch.setattr(cooldown.time, "time", lambda: 20)
+    cache.record("a", 100, "quota")
+    cache.record("a", None, "ok", unless_newer_than=10)
+    assert cache.active("a")
+    cache.record("a", None, "ok", unless_newer_than=30)
+    assert not cache.active("a")

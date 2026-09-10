@@ -19,19 +19,42 @@ class AdapterResult:
     terminal: bool = False
 
 
-def _stop(proc: subprocess.Popen) -> tuple[bytes, bytes]:
+def _signal(proc: subprocess.Popen, sig: int) -> None:
     try:
-        os.killpg(proc.pid, signal.SIGTERM)
+        os.killpg(proc.pid, sig)
     except ProcessLookupError:
         pass
+    except PermissionError:
+        # Restricted hosts may forbid group signalling; still stop our child.
+        try:
+            proc.send_signal(sig)
+        except ProcessLookupError:
+            pass
+
+
+def _stop(proc: subprocess.Popen) -> tuple[bytes, bytes]:
+    _signal(proc, signal.SIGTERM)
     try:
         return proc.communicate(timeout=2)
     except subprocess.TimeoutExpired:
+        _signal(proc, signal.SIGKILL)
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        return proc.communicate(timeout=2)
+            return proc.communicate(timeout=2)
+        except subprocess.TimeoutExpired as exc:
+            # A detached descendant can retain the pipes after our child exits.
+            # Preserve buffered output and bound cleanup instead of waiting for it.
+            for stream in (proc.stdin, proc.stdout, proc.stderr):
+                if stream is not None:
+                    stream.close()
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                try:
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    pass
+            return exc.output or b"", exc.stderr or b""
 
 
 def run_adapter(
@@ -40,44 +63,50 @@ def run_adapter(
     env = os.environ.copy()
     env["LLM_RUN_ENGINE"] = hop.engine
     prompt_file: str | None = None
-    if cfg.command:
-        fd, prompt_file = tempfile.mkstemp(suffix=".prompt")
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(prompt)
-        command = [
-            *cfg.command,
-            "--model",
-            hop.model or "",
-            "--cwd",
-            cwd,
-            "--prompt-file",
-            prompt_file,
-        ]
-        input_bytes = None
-    else:
-        for name in ("ANTHROPIC_API_KEY", "CODEX_API_KEY", "OPENAI_API_KEY"):
-            env.pop(name, None)
-        model_args = ["--model", hop.model] if hop.model else []
-        if cfg.adapter == "codex":
-            command = [
-                cfg.binary,
-                "exec",
-                "--sandbox",
-                "workspace-write",
-                "--skip-git-repo-check",
-                "--json",
-                *model_args,
-                "--cd",
-                cwd,
-                "-",
-            ]
-        else:
-            env.pop("CLAUDECODE", None)
-            command = [cfg.binary, "--print", "--output-format", "json", *model_args]
-        input_bytes = prompt.encode("utf-8")
     started = time.monotonic()
     proc = None
     try:
+        if cfg.command:
+            fd, prompt_file = tempfile.mkstemp(suffix=".prompt")
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(prompt)
+            command = [
+                *cfg.command,
+                "--model",
+                hop.model or "",
+                "--cwd",
+                cwd,
+                "--prompt-file",
+                prompt_file,
+            ]
+            input_bytes = None
+        else:
+            for name in ("ANTHROPIC_API_KEY", "CODEX_API_KEY", "OPENAI_API_KEY"):
+                env.pop(name, None)
+            model_args = ["--model", hop.model] if hop.model else []
+            if cfg.adapter == "codex":
+                command = [
+                    cfg.binary,
+                    "exec",
+                    "--sandbox",
+                    "workspace-write",
+                    "--skip-git-repo-check",
+                    "--json",
+                    *model_args,
+                    "--cd",
+                    cwd,
+                    "-",
+                ]
+            else:
+                env.pop("CLAUDECODE", None)
+                command = [
+                    cfg.binary,
+                    "--print",
+                    "--output-format",
+                    "json",
+                    *model_args,
+                ]
+            input_bytes = prompt.encode("utf-8")
         proc = subprocess.Popen(
             command,
             cwd=cwd,
@@ -96,12 +125,17 @@ def run_adapter(
         except KeyboardInterrupt:
             code, terminal = 130, True
             stdout, stderr = _stop(proc)
-        output = stdout.decode("utf-8", "replace") + stderr.decode("utf-8", "replace")
+        separator = "\n" if stdout and stderr and not stdout.endswith(b"\n") else ""
+        output = (
+            stdout.decode("utf-8", "replace")
+            + separator
+            + stderr.decode("utf-8", "replace")
+        )
         return AdapterResult(
             code if code is not None else proc.returncode,
             output,
             time.monotonic() - started,
-            terminal,
+            terminal or proc.returncode < 0 or proc.returncode in (124, 130),
         )
     except OSError as exc:
         return AdapterResult(
@@ -111,7 +145,9 @@ def run_adapter(
             True,
         )
     finally:
-        if proc is not None and proc.poll() is None:
-            _stop(proc)
-        if prompt_file:
-            Path(prompt_file).unlink(missing_ok=True)
+        try:
+            if proc is not None and proc.poll() is None:
+                _stop(proc)
+        finally:
+            if prompt_file:
+                Path(prompt_file).unlink(missing_ok=True)

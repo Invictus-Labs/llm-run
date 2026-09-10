@@ -1,7 +1,22 @@
 """Parse token counters emitted by coding-agent CLIs."""
 
 import json
+import math
 from typing import Any
+
+
+def _counter(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, bool) or (
+        isinstance(value, float)
+        and (not math.isfinite(value) or not value.is_integer())
+    ):
+        raise ValueError("invalid token count")
+    count = int(value)
+    if not 0 <= count <= 2**63 - 1:
+        raise ValueError("token count out of range")
+    return count
 
 
 def parse_tokens(output: str) -> tuple[dict[str, int] | None, bool]:
@@ -14,14 +29,14 @@ def parse_tokens(output: str) -> tuple[dict[str, int] | None, bool]:
             candidates.append(parsed)
         elif isinstance(parsed, list):
             candidates.extend(x for x in parsed if isinstance(x, dict))
-    except json.JSONDecodeError:
+    except (ValueError, RecursionError):
         for line in text.splitlines():
             line = line.strip()
             if not line.startswith("{"):
                 continue
             try:
                 obj = json.loads(line)
-            except json.JSONDecodeError:
+            except (ValueError, RecursionError):
                 continue
             if isinstance(obj, dict):
                 candidates.append(obj)
@@ -34,8 +49,8 @@ def parse_tokens(output: str) -> tuple[dict[str, int] | None, bool]:
         if inn is None and out is None:
             continue
         try:
-            return {"in": int(inn or 0), "out": int(out or 0)}, False
-        except (TypeError, ValueError):
+            return {"in": _counter(inn), "out": _counter(out)}, False
+        except (TypeError, ValueError, OverflowError):
             continue
     # JSON-looking output that didn't yield usage → parse_failed only if it
     # was supposed to be structured and we got garbage (non-empty, not JSON).

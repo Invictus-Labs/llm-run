@@ -154,3 +154,33 @@ def test_private_state_rejects_symlink_or_public_directory(tmp_path, monkeypatch
     monkeypatch.setenv("LLM_RUN_STATE_DIR", str(target))
     with pytest.raises(ValueError, match="symlink"):
         state_dir()
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--json", "status"],
+        ["status", "--json"],
+        ["--json", "report"],
+        ["report", "--json"],
+    ],
+)
+def test_json_option_works_before_and_after_subcommand(args, capsys):
+    assert main(args) == 0
+    assert isinstance(json.loads(capsys.readouterr().out), dict)
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--lane", "alternate", "status", "--json"],
+        ["status", "--lane", "alternate", "--json"],
+    ],
+)
+def test_status_lane_option_works_before_and_after_subcommand(
+    setup_policy, args, capsys
+):
+    config, _ = setup_policy()
+    config.write_text(config.read_text() + '\n[lanes.alternate]\nchain=["second"]\n')
+    assert main(args) == 0
+    assert json.loads(capsys.readouterr().out)["eligible_chain"] == ["second"]

@@ -72,7 +72,16 @@ def test_second_run_skips_cooldown_and_records_skip(setup_policy):
 
 
 @pytest.mark.parametrize(
-    "first,code", [("error", 1), ("rejection-success", 0), ("binary", 0)]
+    "first,code",
+    [
+        ("error", 1),
+        ("rejection-success", 0),
+        ("binary", 0),
+        ("nested-error", 1),
+        ("exit-124", 124),
+        ("exit-130", 130),
+        ("signal-term", 1),
+    ],
 )
 def test_terminal_results_never_fallback(setup_policy, capsys, first, code):
     _, capture = setup_policy(first)
@@ -80,7 +89,7 @@ def test_terminal_results_never_fallback(setup_policy, capsys, first, code):
     verdict = json.loads(capsys.readouterr().out)
     assert verdict["engine"] == "first"
     assert len(calls(capture)) == 1
-    if first == "rejection-success":
+    if first in ("rejection-success", "exit-124", "exit-130", "signal-term"):
         # Arm the control: removing the success exit-code gate must fail it.
         assert classify_output(verdict["output"]) == "quota"
         assert not Cooldowns().active("first")
@@ -112,12 +121,15 @@ def test_exhausted_and_pinned_runs(setup_policy, capsys):
     assert [r["status"] for r in Ledger().rows()] == ["quota", "skipped", "auth"]
 
 
-@pytest.mark.parametrize("behavior", ["timeout", "ignore-term"])
+@pytest.mark.parametrize("behavior", ["timeout", "ignore-term", "timeout-quota"])
 def test_timeout_kills_process_and_cleans_prompt_without_fallback(
-    setup_policy, behavior
+    setup_policy, behavior, capsys
 ):
     _, capture = setup_policy(behavior)
-    assert main(["--prompt", "timeout", "--timeout", "1"]) == 124
+    assert main(["--prompt", "timeout", "--timeout", "1", "--json"]) == 124
+    verdict = json.loads(capsys.readouterr().out)
+    if behavior == "timeout-quota":
+        assert classify_output(verdict["output"]) == "quota"
     attempt = calls(capture)[0]
     assert len(calls(capture)) == 1
     assert not Path(attempt["prompt_file"]).exists()
@@ -127,7 +139,7 @@ def test_timeout_kills_process_and_cleans_prompt_without_fallback(
 
 
 def test_interrupt_cleans_child_and_prompt(setup_policy, tmp_path):
-    _, capture = setup_policy("timeout")
+    _, capture = setup_policy("timeout-quota")
     env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1] / "src"))
     proc = subprocess.Popen(
         [sys.executable, "-m", "llm_run", "--prompt", "interrupt", "--json"],
@@ -145,6 +157,7 @@ def test_interrupt_cleans_child_and_prompt(setup_policy, tmp_path):
         out, _ = proc.communicate(timeout=8)
         assert proc.returncode == 130
         assert json.loads(out)["exit_code"] == 130
+        assert classify_output(json.loads(out)["output"]) == "quota"
         assert not Path(attempt["prompt_file"]).exists()
         with pytest.raises(ProcessLookupError):
             os.kill(attempt["pid"], 0)
@@ -221,3 +234,67 @@ def test_prompt_file_input(setup_policy, tmp_path):
     path.write_text("multiline\nprompt")
     assert main(["--prompt-file", str(path)]) == 0
     assert calls(capture)[0]["prompt"] == "multiline\nprompt"
+
+
+def test_stderr_error_record_survives_stdout_without_newline(setup_policy):
+    _, capture = setup_policy("stderr-quota")
+    assert main(["--prompt", "test"]) == 0
+    assert [call["engine"] for call in calls(capture)] == ["first", "second"]
+
+
+def test_invalid_usage_preserves_success_and_ledger(setup_policy, capsys):
+    setup_policy("usage-overflow")
+    assert main(["--prompt", "test", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["tokens"] is None
+    assert Ledger().rows()[0]["status"] == "ok"
+
+
+def test_partial_prompt_write_failure_removes_file(setup_policy, monkeypatch):
+    from llm_run import adapter
+
+    _, capture = setup_policy()
+    original_create, original_open = adapter.tempfile.mkstemp, os.fdopen
+    paths = []
+
+    def create(**kwargs):
+        fd, path = original_create(**kwargs)
+        paths.append(Path(path))
+        return fd, path
+
+    class PartialWriter:
+        def __init__(self, inner):
+            self.inner = inner
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.inner.close()
+
+        def write(self, data):
+            self.inner.write(data[:5])
+            self.inner.flush()
+            raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(adapter.tempfile, "mkstemp", create)
+    monkeypatch.setattr(
+        adapter.os, "fdopen", lambda *a, **kw: PartialWriter(original_open(*a, **kw))
+    )
+    assert main(["--prompt", "private example prompt"]) == 1
+    assert paths and all(not p.exists() for p in paths)
+    assert not capture.exists()
+
+
+def test_dispatch_success_does_not_erase_concurrent_quota(setup_policy, monkeypatch):
+    from llm_run import dispatch
+    from llm_run.adapter import AdapterResult
+
+    setup_policy()
+
+    def run(*args, **kwargs):
+        Cooldowns().record("first", int(time.time()) + 60, "quota")
+        return AdapterResult(0, "done", 0)
+
+    monkeypatch.setattr(dispatch, "run_adapter", run)
+    assert main(["--prompt", "test"]) == 0
+    assert Cooldowns().active("first")

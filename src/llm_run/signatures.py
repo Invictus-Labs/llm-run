@@ -45,11 +45,25 @@ def _objects(output: str):
     # Whole JSON and JSONL both occur in CLI output. Only top-level errors count;
     # errors quoted inside a successful result or tool message are ignored.
     text = _window(output)
-    for value in [text, *text.splitlines()]:
-        value = value.strip().removeprefix("ERROR: ")
+    try:
+        obj = json.loads(text.strip().removeprefix("ERROR: "))
+    except (ValueError, RecursionError):
+        pass
+    else:
+        if isinstance(obj, dict):
+            yield obj
+        # A complete envelope is atomic. Do not promote nested objects into
+        # top-level errors by reparsing its individual lines.
+        return
+    if text.lstrip().startswith("{\n"):
+        return  # An incomplete/truncated pretty envelope is ambiguous.
+    for value in text.splitlines():
+        if not value.startswith(("{", "ERROR: {")):
+            continue
+        value = value.removeprefix("ERROR: ")
         try:
             obj = json.loads(value)
-        except (json.JSONDecodeError, RecursionError):
+        except (ValueError, RecursionError):
             continue
         if isinstance(obj, dict):
             yield obj
@@ -62,7 +76,15 @@ def classify_output(output: str, model: str | None = None) -> str | None:
             kind = obj.get("kind")
             if kind in ("quota", "auth", "rejected_model"):
                 return kind
-        if obj.get("type") not in (None, "error"):
+        if obj.get("type") in ("error", "turn.failed"):
+            detail = obj.get("error") if obj.get("type") == "turn.failed" else obj
+            message = detail.get("message") if isinstance(detail, dict) else None
+            if isinstance(message, str):
+                if _LIMIT.fullmatch(message.strip()):
+                    return "quota"
+                if _AUTH.fullmatch(message.strip()):
+                    return "auth"
+        if obj.get("type") not in (None, "error", "turn.failed"):
             continue
         error = obj.get("error")
         if not isinstance(error, dict):
@@ -97,8 +119,8 @@ def parse_reset_epoch(
             seconds = obj.get("retry_after_seconds")
             if (
                 type(seconds) in (float, int)
-                and math.isfinite(seconds)
                 and 0 < seconds <= 604800
+                and math.isfinite(seconds)
             ):
                 return int(now_s + seconds)
     for pattern, multiplier in ((_DAYS, 86400), (_HOURS, 3600), (_MINUTES, 60)):

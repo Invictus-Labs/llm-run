@@ -125,8 +125,8 @@ are best-effort and may be `null`; they are not a billing estimate.
 | `1` | Task, adapter, or local I/O failure; no automatic fallback |
 | `64` | Invalid arguments or configuration |
 | `75` | No configured attempt succeeded; includes exhausted pinned runs |
-| `124` | Timeout; process group terminated, no fallback |
-| `130` | Interrupted; process group terminated, no fallback |
+| `124` | Runner timeout or child exit `124`; no fallback |
+| `130` | Interrupted or child exit `130`; no fallback |
 
 `status` checks binary availability and observed cooldowns. It does not verify
 login, measure remaining subscription quota, or contact a provider.
