@@ -115,10 +115,10 @@ def test_large_noise_retains_terminal_error_and_bounds_scan():
 @pytest.mark.parametrize(
     "text,seconds",
     [
-        ("try again in 2 hours", 7200),
-        ("try again in 1.5 hours", 5400),
-        ("try again after 10 minutes", 600),
-        ("try again in 2 days", 172800),
+        ("ERROR: You've hit your usage limit. Try again in 2 hours", 7200),
+        ("ERROR: You've hit your usage limit. Try again in 1.5 hours", 5400),
+        ("ERROR: You've hit your usage limit. Try again after 10 minutes", 600),
+        ("ERROR: You've hit your usage limit. Try again in 2 days", 172800),
         ("no reset information", 100),
         ("try again in 999999999 days", 100),
         (
@@ -275,3 +275,60 @@ def test_scan_window_cannot_create_provider_sentence_inside_json():
         is None
     )
     assert classify_output(text + "\n" + phrase) == "quota"
+
+
+@pytest.mark.parametrize(
+    "task",
+    [
+        "Task: retry the application in 6 days",
+        json.dumps({"type": "result", "result": "Retry in 6 days"}),
+        json.dumps({"type": "result", "is_error": True, "result": "Retry in 6 days"}),
+    ],
+)
+@pytest.mark.parametrize(
+    "provider",
+    [
+        "ERROR: You've hit your usage limit. Try again in 2 hours",
+        json.dumps(
+            {
+                "type": "error",
+                "message": "You've hit your usage limit. Try again in 2 hours",
+            }
+        ),
+        json.dumps(
+            {
+                "type": "turn.failed",
+                "error": {
+                    "message": "You've hit your usage limit. Try again in 2 hours"
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "type": "error",
+                "error": {
+                    "type": "rate_limit_error",
+                    "message": "Try again in 2 hours",
+                },
+            }
+        ),
+    ],
+)
+def test_reset_uses_provider_message_not_task_prose(task, provider):
+    for text in (task + "\n" + provider, provider + "\n" + task):
+        assert classify_output(text) == "quota"
+        assert parse_reset_epoch(text, 100, now=1000) == 8200
+
+
+def test_reset_without_provider_hint_ignores_task_duration():
+    text = json.dumps({"type": "result", "result": "retry in 6 days"}) + "\n"
+    text += json.dumps({"type": "error", "error": {"type": "rate_limit_error"}})
+    assert classify_output(text) == "quota"
+    assert parse_reset_epoch(text, 100, now=1000) == 1100
+
+
+def test_reset_custom_adapter_interval_survives_task_noise():
+    text = "task: retry in 6 days\n" + json.dumps(
+        {"type": "llm_run_error", "kind": "quota", "retry_after_seconds": 60}
+    )
+    assert parse_reset_epoch(text, 100, now=1000) == 1060

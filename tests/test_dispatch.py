@@ -73,7 +73,7 @@ def test_task_auth_prose_stops_without_auth_state_or_fallback(setup_policy, caps
     assert verdict["fallback_depth"] == 0
     assert len(calls(capture)) == 1
     assert [row["status"] for row in Ledger().rows()] == ["error"]
-    assert not Cooldowns().active("first")
+    assert Cooldowns().get("first") == {}
 
 
 def test_second_run_skips_cooldown_and_records_skip(setup_policy):

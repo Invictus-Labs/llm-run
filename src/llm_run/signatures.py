@@ -125,10 +125,46 @@ def parse_reset_epoch(
                 and math.isfinite(seconds)
             ):
                 return int(now_s + seconds)
-    for pattern, multiplier in ((_DAYS, 86400), (_HOURS, 3600), (_MINUTES, 60)):
-        match = pattern.search(_window(output))
-        if match:
-            seconds = float(match.group(1)) * multiplier
-            if 0 < seconds <= 604800:
-                return int(now_s + seconds)
+    # Reset hints belong to a recognized provider quota message, never to
+    # task prose elsewhere in the output or inside a completed result.
+    for record in _records(output):
+        messages = []
+        if isinstance(record, str):
+            messages = [
+                line.strip()
+                for line in record.split("\n")
+                if _LIMIT.fullmatch(line.strip())
+            ]
+        elif record.get("type") in (None, "error", "turn.failed"):
+            detail = (
+                record.get("error") if record.get("type") == "turn.failed" else record
+            )
+            message = detail.get("message") if isinstance(detail, dict) else None
+            if isinstance(message, str) and _LIMIT.fullmatch(message.strip()):
+                messages.append(message)
+            error = record.get("error")
+            if (
+                isinstance(error, dict)
+                and (
+                    _TYPES.get(str(error.get("type"))) == "quota"
+                    or _TYPES.get(str(error.get("code"))) == "quota"
+                )
+                and isinstance(error.get("message"), str)
+            ):
+                messages.append(error["message"])
+        for message in messages:
+            matches = [
+                (match.start(), match, multiplier)
+                for pattern, multiplier in (
+                    (_DAYS, 86400),
+                    (_HOURS, 3600),
+                    (_MINUTES, 60),
+                )
+                if (match := pattern.search(message))
+            ]
+            if matches:
+                _, match, multiplier = min(matches, key=lambda item: item[0])
+                seconds = float(match.group(1)) * multiplier
+                if 0 < seconds <= 604800:
+                    return int(now_s + seconds)
     return int(now_s + default_cooldown_s)
