@@ -1,7 +1,7 @@
 # Code review — authentication and cooldown boundaries
 
 ## Scope
-Reviewed cac9ace..d1d59ee: seven files covering provider error handling, regression tests, architecture documentation and review-note cleanup.
+Reviewed cac9ace..2eb5d8: seven files covering provider error handling, regression tests, architecture documentation and review-note cleanup.
 
 ## Verdict
 APPROVED. No open findings across security, logic, tests, consistency and performance.
@@ -13,7 +13,7 @@ APPROVED. No open findings across security, logic, tests, consistency and perfor
 - Examples and documentation remain generic and portable. No account-file discovery, telemetry endpoint or runtime dependency was introduced.
 
 ## Validation
-Full quality gate:195tests passed,96.88%coverage. Regression tests cover plain and structured quota messages, task/result noise, absent hints and custom intervals. Authentication-state and reset-parser mutations were detected by assertions. Independent reset checks:14passed; restoring the previous parser triggered13assertion failures. Controlled searches supported all five review dimensions; full source and caller inspection also performed. No live providers used.
+Full quality gate:226 tests passed, 96.92% coverage. Regression tests cover plain and structured quota messages, task/result noise, absent hints and custom intervals. Authentication-state and reset-parser mutations were detected by assertions. Independent reset checks:14passed; restoring the previous parser triggered13assertion failures. Controlled searches supported all five review dimensions; full source and caller inspection also performed. No live providers used.
 
 ## Coverage map
 | Contract | Evidence |
@@ -27,5 +27,10 @@ Full quality gate:195tests passed,96.88%coverage. Regression tests cover plain a
 
 ## Limits
 Synthetic fixtures cannot establish compatibility with every future provider format. Content inspection and pattern checks are not a guarantee of universal secret detection or removal of earlier published copies.
+
+## Final retry-hint follow-up
+Immediate standalone retry hints following a provider quota line are retained, including exact two-line structured messages. Task text, blank lines and JSON record boundaries cannot bridge a continuation. Fractional days, hours and minutes use consistent conversion with the existing positive/seven-day bounds.
+
+Final source: `2eb5d8`. Full suite: 226 passed, 96.92% coverage. Independent test subset: 31 passed; 24 additional fractional-unit/boundary probes passed. Independent logic checks: nine positive and seven negative cases passed. Reverting continuation support caused four regression failures. Security, logic, tests, consistency and performance follow-up passes found no remaining issue.
 
 SWARM-RECEIPT: APPROVED · 5/5 dimensions · 0 findings (0 major) · code-review/REVIEW-2026-09-25-AUTH-BOUNDARIES.md
