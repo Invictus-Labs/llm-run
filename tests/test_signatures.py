@@ -42,6 +42,30 @@ def test_task_errors_do_not_look_like_provider_failures(text):
 
 
 @pytest.mark.parametrize(
+    "text",
+    [
+        json.dumps(
+            {
+                "type": "result",
+                "is_error": True,
+                "result": "Not logged in. Please run /login",
+            }
+        ),
+        json.dumps(
+            {
+                "type": "result",
+                "is_error": True,
+                "result": "OAuth session expired. Please run /login",
+            }
+        ),
+        "Error: Unauthorized response from local API",
+    ],
+)
+def test_ordinary_task_auth_text_is_not_a_provider_auth_failure(text):
+    assert classify_output(text) is None
+
+
+@pytest.mark.parametrize(
     "error_type,expected",
     [
         ("rate_limit_error", "quota"),
@@ -91,10 +115,10 @@ def test_large_noise_retains_terminal_error_and_bounds_scan():
 @pytest.mark.parametrize(
     "text,seconds",
     [
-        ("try again in 2 hours", 7200),
-        ("try again in 1.5 hours", 5400),
-        ("try again after 10 minutes", 600),
-        ("try again in 2 days", 172800),
+        ("ERROR: You've hit your usage limit. Try again in 2 hours", 7200),
+        ("ERROR: You've hit your usage limit. Try again in 1.5 hours", 5400),
+        ("ERROR: You've hit your usage limit. Try again after 10 minutes", 600),
+        ("ERROR: You've hit your usage limit. Try again in 2 days", 172800),
         ("no reset information", 100),
         ("try again in 999999999 days", 100),
         (
@@ -251,3 +275,140 @@ def test_scan_window_cannot_create_provider_sentence_inside_json():
         is None
     )
     assert classify_output(text + "\n" + phrase) == "quota"
+
+
+@pytest.mark.parametrize(
+    "task",
+    [
+        "Task: retry the application in 6 days",
+        json.dumps({"type": "result", "result": "Retry in 6 days"}),
+        json.dumps({"type": "result", "is_error": True, "result": "Retry in 6 days"}),
+    ],
+)
+@pytest.mark.parametrize(
+    "provider",
+    [
+        "ERROR: You've hit your usage limit. Try again in 2 hours",
+        json.dumps(
+            {
+                "type": "error",
+                "message": "You've hit your usage limit. Try again in 2 hours",
+            }
+        ),
+        json.dumps(
+            {
+                "type": "turn.failed",
+                "error": {
+                    "message": "You've hit your usage limit. Try again in 2 hours"
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "type": "error",
+                "error": {
+                    "type": "rate_limit_error",
+                    "message": "Try again in 2 hours",
+                },
+            }
+        ),
+    ],
+)
+def test_reset_uses_provider_message_not_task_prose(task, provider):
+    for text in (task + "\n" + provider, provider + "\n" + task):
+        assert classify_output(text) == "quota"
+        assert parse_reset_epoch(text, 100, now=1000) == 8200
+
+
+def test_reset_without_provider_hint_ignores_task_duration():
+    text = json.dumps({"type": "result", "result": "retry in 6 days"}) + "\n"
+    text += json.dumps({"type": "error", "error": {"type": "rate_limit_error"}})
+    assert classify_output(text) == "quota"
+    assert parse_reset_epoch(text, 100, now=1000) == 1100
+
+
+def test_reset_custom_adapter_interval_survives_task_noise():
+    text = "task: retry in 6 days\n" + json.dumps(
+        {"type": "llm_run_error", "kind": "quota", "retry_after_seconds": 60}
+    )
+    assert parse_reset_epoch(text, 100, now=1000) == 1060
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "ERROR: You've hit your usage limit.\nTry again in 2 hours.",
+        "ERROR: You've hit your usage limit.\r\n  Try again after 10 minutes.\r\n",
+        json.dumps(
+            {
+                "type": "error",
+                "message": "You've hit your usage limit.\nTry again in 2 hours.",
+            },
+            indent=2,
+        ),
+        json.dumps(
+            {
+                "type": "turn.failed",
+                "error": {
+                    "message": "You've hit your usage limit.\nTry again in 2 hours."
+                },
+            },
+            indent=2,
+        ),
+    ],
+)
+def test_adjacent_provider_retry_continuation(output):
+    assert classify_output(output) == "quota"
+    assert parse_reset_epoch(output, 100, now=1000) == (
+        1600 if "10 minutes" in output else 8200
+    )
+
+
+@pytest.mark.parametrize(
+    "following",
+    [
+        "Task progress\nTry again in 2 hours.",
+        "\nTry again in 2 hours.",
+        'Task says "Try again in 2 hours."',
+        "Try again in 2 hours. This is task prose.",
+        json.dumps({"type": "result", "result": "Try again in 2 hours."}),
+        json.dumps({"type": "result", "result": "done"}) + "\nTry again in 2 hours.",
+        "Try again in 999999999 days.",
+        "Try again in " + "9" * 10000 + " hours.",
+    ],
+)
+def test_retry_continuation_does_not_cross_task_or_record_boundaries(following):
+    output = "ERROR: You've hit your usage limit.\n" + following
+    assert classify_output(output) == "quota"
+    assert parse_reset_epoch(output, 100, now=1000) == 1100
+
+
+def test_standalone_retry_hint_is_not_provider_quota():
+    output = "Try again in 2 hours."
+    assert classify_output(output) is None
+    assert parse_reset_epoch(output, 100, now=1000) == 1100
+
+
+@pytest.mark.parametrize(
+    "duration,seconds",
+    [
+        ("1.5 days", 129600),
+        ("1.5 minutes", 90),
+        ("0.5 minutes", 30),
+        ("7.0 days", 604800),
+        ("7.001 days", 100),
+        ("-1.5 days", 100),
+        ("-1.5 minutes", 100),
+        ("0.0 minutes", 100),
+        ("999999999.5 minutes", 100),
+    ],
+)
+@pytest.mark.parametrize("structured", [False, True])
+def test_fractional_retry_continuation_units_and_bounds(duration, seconds, structured):
+    message = "You've hit your usage limit.\nTry again in " + duration + "."
+    output = (
+        json.dumps({"type": "error", "message": message})
+        if structured
+        else "ERROR: " + message
+    )
+    assert parse_reset_epoch(output, 100, now=1000) == 1000 + seconds

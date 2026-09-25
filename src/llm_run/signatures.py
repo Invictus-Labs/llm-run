@@ -28,9 +28,29 @@ _AUTH = re.compile(
     r"^(?:ERROR: )?(?:Not logged in[. ]*Please run /login|OAuth session expired[. ]*Please run /login)[.!]?$",
     re.I,
 )
+# Only a standalone, immediately adjacent provider retry sentence may extend
+# a plain quota line. Do not collect arbitrary following task output.
+_RETRY_LINE = re.compile(
+    r"Try again (?:in|after) [0-9]{1,9}(?:\.[0-9]{1,3})? (?:days?|hours?|minutes?)[.!]?",
+    re.I,
+)
+
+
+def _is_limit_message(message: str) -> bool:
+    lines = message.strip().split("\n")
+    return bool(
+        _LIMIT.fullmatch(message.strip())
+        or (
+            len(lines) == 2
+            and _LIMIT.fullmatch(lines[0].strip())
+            and _RETRY_LINE.fullmatch(lines[1].strip())
+        )
+    )
+
+
 _HOURS = re.compile(r"(?:in|after)\s+(\d+(?:\.\d+)?)\s*hours?", re.I)
-_MINUTES = re.compile(r"(?:in|after)\s+(\d+)\s*minutes?", re.I)
-_DAYS = re.compile(r"(?:in|after)\s+(\d+)\s*days?", re.I)
+_MINUTES = re.compile(r"(?:in|after)\s+(\d+(?:\.\d+)?)\s*minutes?", re.I)
+_DAYS = re.compile(r"(?:in|after)\s+(\d+(?:\.\d+)?)\s*days?", re.I)
 
 
 def _window(output: str) -> str:
@@ -87,7 +107,7 @@ def classify_output(output: str, model: str | None = None) -> str | None:
             detail = obj.get("error") if obj.get("type") == "turn.failed" else obj
             message = detail.get("message") if isinstance(detail, dict) else None
             if isinstance(message, str):
-                if _LIMIT.fullmatch(message.strip()):
+                if _is_limit_message(message):
                     return "quota"
                 if _AUTH.fullmatch(message.strip()):
                     return "auth"
@@ -125,10 +145,50 @@ def parse_reset_epoch(
                 and math.isfinite(seconds)
             ):
                 return int(now_s + seconds)
-    for pattern, multiplier in ((_DAYS, 86400), (_HOURS, 3600), (_MINUTES, 60)):
-        match = pattern.search(_window(output))
-        if match:
-            seconds = float(match.group(1)) * multiplier
-            if 0 < seconds <= 604800:
-                return int(now_s + seconds)
+    # Reset hints belong to a recognized provider quota message, never to
+    # task prose elsewhere in the output or inside a completed result.
+    for record in _records(output):
+        messages = []
+        if isinstance(record, str):
+            lines = record.split("\n")
+            for index, line in enumerate(lines):
+                if _LIMIT.fullmatch(line.strip()):
+                    message = line.strip()
+                    if index + 1 < len(lines) and _RETRY_LINE.fullmatch(
+                        lines[index + 1].strip()
+                    ):
+                        message += " " + lines[index + 1].strip()
+                    messages.append(message)
+        elif record.get("type") in (None, "error", "turn.failed"):
+            detail = (
+                record.get("error") if record.get("type") == "turn.failed" else record
+            )
+            message = detail.get("message") if isinstance(detail, dict) else None
+            if isinstance(message, str) and _is_limit_message(message):
+                messages.append(message)
+            error = record.get("error")
+            if (
+                isinstance(error, dict)
+                and (
+                    _TYPES.get(str(error.get("type"))) == "quota"
+                    or _TYPES.get(str(error.get("code"))) == "quota"
+                )
+                and isinstance(error.get("message"), str)
+            ):
+                messages.append(error["message"])
+        for message in messages:
+            matches = [
+                (match.start(), match, multiplier)
+                for pattern, multiplier in (
+                    (_DAYS, 86400),
+                    (_HOURS, 3600),
+                    (_MINUTES, 60),
+                )
+                if (match := pattern.search(message))
+            ]
+            if matches:
+                _, match, multiplier = min(matches, key=lambda item: item[0])
+                seconds = float(match.group(1)) * multiplier
+                if 0 < seconds <= 604800:
+                    return int(now_s + seconds)
     return int(now_s + default_cooldown_s)

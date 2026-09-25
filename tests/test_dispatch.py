@@ -58,6 +58,24 @@ def test_fallback_and_metadata_privacy(setup_policy, tmp_path, capsys, kind):
     )
 
 
+def test_structured_provider_authentication_falls_back(setup_policy):
+    _, capture = setup_policy("provider-auth")
+    assert main(["--prompt", "example"]) == 0
+    assert [call["engine"] for call in calls(capture)] == ["first", "second"]
+    assert [row["status"] for row in Ledger().rows()] == ["auth", "ok"]
+
+
+def test_task_auth_prose_stops_without_auth_state_or_fallback(setup_policy, capsys):
+    _, capture = setup_policy("task-auth-prose")
+    assert main(["--prompt", "example", "--json"]) == 1
+    verdict = json.loads(capsys.readouterr().out)
+    assert verdict["engine"] == "first"
+    assert verdict["fallback_depth"] == 0
+    assert len(calls(capture)) == 1
+    assert [row["status"] for row in Ledger().rows()] == ["error"]
+    assert Cooldowns().get("first") == {}
+
+
 def test_second_run_skips_cooldown_and_records_skip(setup_policy):
     _, capture = setup_policy("quota")
     assert main(["--prompt", "first"]) == 0

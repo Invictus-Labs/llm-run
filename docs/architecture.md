@@ -30,7 +30,11 @@ binary is a configuration/runtime error and stops the run too.
 Classification accepts explicit custom-adapter error records, selected structured
 provider envelopes, and a small set of anchored CLI error sentences. A message
 merely containing `401`, `429`, `authentication`, or `rate limit` is insufficient.
+Likewise, authentication-like prose inside a completed result envelope, including
+one marked as a task error, remains task output and does not trigger fallback.
 Model-rejection messages are checked against an explicitly selected model.
+Cooldown reset hints come from recognized provider quota messages or explicit
+custom-adapter retry intervals; durations in task output are ignored.
 Provider output can change; an unrecognized error stops rather than guessing.
 
 Fallback cannot determine whether an earlier attempt already edited files or
