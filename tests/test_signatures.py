@@ -332,3 +332,58 @@ def test_reset_custom_adapter_interval_survives_task_noise():
         {"type": "llm_run_error", "kind": "quota", "retry_after_seconds": 60}
     )
     assert parse_reset_epoch(text, 100, now=1000) == 1060
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "ERROR: You've hit your usage limit.\nTry again in 2 hours.",
+        "ERROR: You've hit your usage limit.\r\n  Try again after 10 minutes.\r\n",
+        json.dumps(
+            {
+                "type": "error",
+                "message": "You've hit your usage limit.\nTry again in 2 hours.",
+            },
+            indent=2,
+        ),
+        json.dumps(
+            {
+                "type": "turn.failed",
+                "error": {
+                    "message": "You've hit your usage limit.\nTry again in 2 hours."
+                },
+            },
+            indent=2,
+        ),
+    ],
+)
+def test_adjacent_provider_retry_continuation(output):
+    assert classify_output(output) == "quota"
+    assert parse_reset_epoch(output, 100, now=1000) == (
+        1600 if "10 minutes" in output else 8200
+    )
+
+
+@pytest.mark.parametrize(
+    "following",
+    [
+        "Task progress\nTry again in 2 hours.",
+        "\nTry again in 2 hours.",
+        'Task says "Try again in 2 hours."',
+        "Try again in 2 hours. This is task prose.",
+        json.dumps({"type": "result", "result": "Try again in 2 hours."}),
+        json.dumps({"type": "result", "result": "done"}) + "\nTry again in 2 hours.",
+        "Try again in 999999999 days.",
+        "Try again in " + "9" * 10000 + " hours.",
+    ],
+)
+def test_retry_continuation_does_not_cross_task_or_record_boundaries(following):
+    output = "ERROR: You've hit your usage limit.\n" + following
+    assert classify_output(output) == "quota"
+    assert parse_reset_epoch(output, 100, now=1000) == 1100
+
+
+def test_standalone_retry_hint_is_not_provider_quota():
+    output = "Try again in 2 hours."
+    assert classify_output(output) is None
+    assert parse_reset_epoch(output, 100, now=1000) == 1100
