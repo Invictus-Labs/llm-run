@@ -49,8 +49,8 @@ def _is_limit_message(message: str) -> bool:
 
 
 _HOURS = re.compile(r"(?:in|after)\s+(\d+(?:\.\d+)?)\s*hours?", re.I)
-_MINUTES = re.compile(r"(?:in|after)\s+(\d+)\s*minutes?", re.I)
-_DAYS = re.compile(r"(?:in|after)\s+(\d+)\s*days?", re.I)
+_MINUTES = re.compile(r"(?:in|after)\s+(\d+(?:\.\d+)?)\s*minutes?", re.I)
+_DAYS = re.compile(r"(?:in|after)\s+(\d+(?:\.\d+)?)\s*days?", re.I)
 
 
 def _window(output: str) -> str:

@@ -387,3 +387,28 @@ def test_standalone_retry_hint_is_not_provider_quota():
     output = "Try again in 2 hours."
     assert classify_output(output) is None
     assert parse_reset_epoch(output, 100, now=1000) == 1100
+
+
+@pytest.mark.parametrize(
+    "duration,seconds",
+    [
+        ("1.5 days", 129600),
+        ("1.5 minutes", 90),
+        ("0.5 minutes", 30),
+        ("7.0 days", 604800),
+        ("7.001 days", 100),
+        ("-1.5 days", 100),
+        ("-1.5 minutes", 100),
+        ("0.0 minutes", 100),
+        ("999999999.5 minutes", 100),
+    ],
+)
+@pytest.mark.parametrize("structured", [False, True])
+def test_fractional_retry_continuation_units_and_bounds(duration, seconds, structured):
+    message = "You've hit your usage limit.\nTry again in " + duration + "."
+    output = (
+        json.dumps({"type": "error", "message": message})
+        if structured
+        else "ERROR: " + message
+    )
+    assert parse_reset_epoch(output, 100, now=1000) == 1000 + seconds
