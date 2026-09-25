@@ -1,46 +1,31 @@
-# Code Review — authentication boundary regressions — 2026-09-25
+# Code review — authentication and cooldown boundaries
 
-## Diff Scope
-- Exact base/head: `cac9ace..90d40bd4fad891cd44781e8f3ec76cc333fb0d2b`.
-- Review mode: STANDARD; four files, +51/-0 lines: docs/architecture.md, tests/conftest.py, tests/test_dispatch.py, tests/test_signatures.py. No production runtime changes.
-- Flags: AUTH test contracts. No migrations.
+## Scope
+Reviewed cac9ace..d1d59ee: seven files covering provider error handling, regression tests, architecture documentation and review-note cleanup.
 
 ## Verdict
-**APPROVED**
-No actionable findings in the reviewed public diff. This is a review verdict, not merge or deployment authorization.
+APPROVED. No open findings across security, logic, tests, consistency and performance.
 
-## Findings
-No findings.
+## Behavior verified
+- Authentication-like task prose stops without creating authentication state or retrying another engine.
+- Explicit provider authentication errors retain fallback behavior.
+- Cooldown intervals come from recognized provider quota messages or explicit adapter retry intervals, ignoring task prose before or after them.
+- Examples and documentation remain generic and portable. No account-file discovery, telemetry endpoint or runtime dependency was introduced.
 
-## Test Coverage Gaps
-| Changed contract | Evidence | Missing cases |
-|---|---|---|
-| Fake provider-auth mode and positive dispatch | Structured provider auth falls back; child order, auth/ok ledger statuses asserted | None identified in changed scope |
-| Fake task-auth-prose mode and negative dispatch | Terminal error, depth0, single child, no auth state/cooldown asserted | None identified in changed scope |
-| Classifier task-prose negatives | Two result-envelope phrases and plain Unauthorized; existing positive protocol cases retained | None identified in changed scope |
-| Architecture contract | Compared with existing classifier/dispatch and changed tests | None identified in changed scope |
+## Validation
+Full quality gate:195tests passed,96.88%coverage. Regression tests cover plain and structured quota messages, task/result noise, absent hints and custom intervals. Authentication-state and reset-parser mutations were detected by assertions. Independent reset checks:14passed; restoring the previous parser triggered13assertion failures. Controlled searches supported all five review dimensions; full source and caller inspection also performed. No live providers used.
 
-## Pattern Notes
-Five dimensions checked security, logic, coverage, consistency and performance. Tests follow existing conventions, and no new runtime cost or dependencies are introduced. Previous 181-test gate is historical evidence; no full-suite rerun was needed for this read-only review.
+## Coverage map
+| Contract | Evidence |
+|---|---|
+| Provider authentication fallback | Two-adapter order and authentication/success ledger assertions |
+| Ordinary task error | Single invocation, terminal error and empty authentication state |
+| Provider-only reset intervals | Plain, error, turn.failed and nested error formats with task noise in both orders |
+| Missing reset hint | Default cooldown despite a duration in task output |
+| Explicit adapter interval | Bounded retry interval preserved beside unrelated prose |
+| Privacy and portability | Current tracked source, examples, docs and review notes inspected for embedded operational data |
 
-## Verification and limits
-
-Five review dimensions covered the changed files and relevant implementation.
-Scoped positive and negative search controls passed, alongside manual review.
-Provider-authentication positives and ordinary-task-error negatives were checked.
-Tests use synthetic adapters; live provider behavior was not verified.
-Independent model diversity is not claimed.
-
-## Follow-up verification
-
-A subsequent regression fix confines cooldown reset durations to recognized
-provider quota messages and explicit adapter retry intervals. Synthetic tests
-cover unrelated task durations before and after plain and structured provider
-errors, missing reset hints, and explicit retry intervals. The task-error test
-also requires no stored authentication entry, including entries without an
-active cooldown. Isolated mutations of both guarantees failed assertions.
-Public review documentation uses generic implementation and verification facts.
-This follow-up is additional verification, not an expansion of the original
-four-file review scope above.
+## Limits
+Synthetic fixtures cannot establish compatibility with every future provider format. Content inspection and pattern checks are not a guarantee of universal secret detection or removal of earlier published copies.
 
 SWARM-RECEIPT: APPROVED · 5/5 dimensions · 0 findings (0 major) · code-review/REVIEW-2026-09-25-AUTH-BOUNDARIES.md
