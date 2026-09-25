@@ -42,6 +42,30 @@ def test_task_errors_do_not_look_like_provider_failures(text):
 
 
 @pytest.mark.parametrize(
+    "text",
+    [
+        json.dumps(
+            {
+                "type": "result",
+                "is_error": True,
+                "result": "Not logged in. Please run /login",
+            }
+        ),
+        json.dumps(
+            {
+                "type": "result",
+                "is_error": True,
+                "result": "OAuth session expired. Please run /login",
+            }
+        ),
+        "Error: Unauthorized response from local API",
+    ],
+)
+def test_ordinary_task_auth_text_is_not_a_provider_auth_failure(text):
+    assert classify_output(text) is None
+
+
+@pytest.mark.parametrize(
     "error_type,expected",
     [
         ("rate_limit_error", "quota"),

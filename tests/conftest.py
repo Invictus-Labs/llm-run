@@ -34,6 +34,13 @@ if behavior in ['quota', 'auth', 'rejected_model']:
 if behavior == 'provider-quota':
     print(json.dumps({'type':'error','error':{'type':'rate_limit_error','message':'capacity exhausted'}}))
     sys.exit(1)
+if behavior == 'provider-auth':
+    print(json.dumps({'type':'error','error':{'type':'authentication_error','message':'provider rejected credentials'}}))
+    sys.exit(1)
+if behavior == 'task-auth-prose':
+    print(json.dumps({'type':'result','is_error':True,'result':'Not logged in. Please run /login'}))
+    print('Error: Unauthorized response from local API')
+    sys.exit(17)
 if behavior == 'error':
     print('ValueError: task discusses authentication 401, 429 and rate limit tests')
     sys.exit(17)
